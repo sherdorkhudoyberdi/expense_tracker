@@ -24,14 +24,24 @@ class Category(models.Model):
         ('expense', 'Expense'),
     ]
 
-    name = models.CharField(max_length=100, unique=True)  # Unique category names
+    name = models.CharField(max_length=100)  # Remove unique constraint
     category_type = models.CharField(max_length=10, choices=CATEGORY_TYPE_CHOICES)
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE, null=True, blank=True)  # Admin-created categories have user=None
 
     class Meta:
         verbose_name_plural = "Categories"
 
     def __str__(self):
-        return f"{self.name} ({self.category_type})"
+        owner = self.user.username if self.user else "Admin"
+        return f"{self.name} ({self.category_type}) - {owner}"
+
+class HiddenCategory(models.Model):
+    """Tracks which admin-created categories have been hidden by users."""
+    user = models.ForeignKey(CustomUser, on_delete=models.CASCADE)
+    category = models.ForeignKey(Category, on_delete=models.CASCADE)
+
+    class Meta:
+        unique_together = ('user', 'category')
 
 
 class Transaction(models.Model):
