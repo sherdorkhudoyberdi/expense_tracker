@@ -17,23 +17,23 @@ class MoneyAccountSerializer(serializers.ModelSerializer):
         account.save()
         return account
 
-    def update(self, instance, validated_data):
-        """
-        Update all fields, but reset balance to zero before setting a new balance.
-        """
-        new_balance = validated_data.get("balance", instance.balance)
-
-        # Reset balance to zero and then set the new balance
-        instance.balance = 0
-        instance.balance += new_balance  # Ensure balance is updated correctly
-
-        # Update all other fields dynamically
-        for attr, value in validated_data.items():
-            if attr != "balance":  # Avoid setting balance twice
-                setattr(instance, attr, value)
-
-        instance.save()
-        return instance
+    # def update(self, instance, validated_data):
+    #     """
+    #     Update all fields, but reset balance to zero before setting a new balance.
+    #     """
+    #     new_balance = validated_data.get("balance", instance.balance)
+    #
+    #     # Reset balance to zero and then set the new balance
+    #     instance.balance = 0
+    #     instance.balance += new_balance  # Ensure balance is updated correctly
+    #
+    #     # Update all other fields dynamically
+    #     for attr, value in validated_data.items():
+    #         if attr != "balance":  # Avoid setting balance twice
+    #             setattr(instance, attr, value)
+    #
+    #     instance.save()
+    #     return instance
 
 
 class CategorySerializer(serializers.ModelSerializer):
