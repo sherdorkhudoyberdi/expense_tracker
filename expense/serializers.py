@@ -4,7 +4,7 @@ from .models import MoneyAccount, Category, Transaction
 class MoneyAccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = MoneyAccount
-        fields = '__all__'
+        fields = ['id', 'user', 'name', 'account_type', 'currency', 'balance']
         read_only_fields = ['user']
 
     def create(self, validated_data):
@@ -39,12 +39,12 @@ class MoneyAccountSerializer(serializers.ModelSerializer):
 class CategorySerializer(serializers.ModelSerializer):
     class Meta:
         model = Category
-        fields = '__all__'
+        fields = ['id', 'name', 'category_type', 'user']
 
 class TransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Transaction
-        fields = '__all__'
+        fields = ['id', 'user', 'category', 'transaction_type', 'amount', 'money_account', 'date']
         read_only_fields = ['user']
 
     def create(self, validated_data):
