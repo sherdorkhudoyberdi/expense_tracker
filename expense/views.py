@@ -1,4 +1,5 @@
 from django.db.models import Q
+from django.db.models import Sum
 from rest_framework.pagination import PageNumberPagination
 from rest_framework import filters
 from .filters import TransactionFilter
@@ -240,14 +241,42 @@ class TransactionDetailView(APIView):
     )
     def put(self, request, pk):
         """
-        Fully update an existing transaction.
+        Fully update an existing transaction and adjust the balance accordingly.
         """
         transaction = get_object_or_404(Transaction, pk=pk, user=request.user)
+        money_account = transaction.money_account
+        old_amount = transaction.amount
+        old_type = transaction.transaction_type
+
         serializer = TransactionSerializer(transaction, data=request.data, partial=False)
         if serializer.is_valid():
+            new_type = serializer.validated_data.get('transaction_type', old_type)
+            new_amount = serializer.validated_data.get('amount', old_amount)
+            new_money_account = serializer.validated_data.get('money_account', money_account)
+
+            # Reverse the previous transaction effect
+            if old_type == 'income':
+                money_account.balance -= old_amount
+            elif old_type == 'expense':
+                money_account.balance += old_amount
+
+            # Apply the new transaction effect
+            if new_type == 'income':
+                new_money_account.balance += new_amount
+            elif new_type == 'expense':
+                if new_money_account.balance < new_amount:
+                    return Response({'error': 'Insufficient balance for this expense'}, status=status.HTTP_400_BAD_REQUEST)
+                new_money_account.balance -= new_amount
+
+            # Save changes
+            if new_money_account != money_account:
+                money_account.save()  # Save old account balance if changed
+            new_money_account.save()
             serializer.save()
+
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
     @swagger_auto_schema(
         request_body=TransactionSerializer,
@@ -255,12 +284,39 @@ class TransactionDetailView(APIView):
     )
     def patch(self, request, pk):
         """
-        Partially update a transaction.
+        Partially update a transaction and adjust the balance accordingly.
         """
         transaction = get_object_or_404(Transaction, pk=pk, user=request.user)
+        money_account = transaction.money_account
+        old_amount = transaction.amount
+        old_type = transaction.transaction_type
+
         serializer = TransactionSerializer(transaction, data=request.data, partial=True)
         if serializer.is_valid():
+            new_type = serializer.validated_data.get('transaction_type', old_type)
+            new_amount = serializer.validated_data.get('amount', old_amount)
+            new_money_account = serializer.validated_data.get('money_account', money_account)
+
+            # Reverse the previous transaction effect
+            if old_type == 'income':
+                money_account.balance -= old_amount
+            elif old_type == 'expense':
+                money_account.balance += old_amount
+
+            # Apply the new transaction effect
+            if new_type == 'income':
+                new_money_account.balance += new_amount
+            elif new_type == 'expense':
+                if new_money_account.balance < new_amount:
+                    return Response({'error': 'Insufficient balance for this expense'}, status=status.HTTP_400_BAD_REQUEST)
+                new_money_account.balance -= new_amount
+
+            # Save changes
+            if new_money_account != money_account:
+                money_account.save()  # Save old account balance if changed
+            new_money_account.save()
             serializer.save()
+
             return Response(serializer.data, status=status.HTTP_200_OK)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -282,3 +338,121 @@ class TransactionDetailView(APIView):
         transaction.delete()
 
         return Response({"message": "Transaction deleted successfully"}, status=status.HTTP_204_NO_CONTENT)
+
+class MonthlySummaryView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter('year', openapi.IN_PATH, description="Year (YYYY)", type=openapi.TYPE_INTEGER),
+            openapi.Parameter('month', openapi.IN_PATH, description="Month (1-12)", type=openapi.TYPE_INTEGER),
+        ],
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "year": openapi.Schema(type=openapi.TYPE_INTEGER, description="Requested year"),
+                    "month": openapi.Schema(type=openapi.TYPE_INTEGER, description="Requested month"),
+                    "total_income": openapi.Schema(type=openapi.TYPE_NUMBER, format=openapi.FORMAT_DECIMAL,
+                                                   description="Total income for the month"),
+                    "total_expense": openapi.Schema(type=openapi.TYPE_NUMBER, format=openapi.FORMAT_DECIMAL,
+                                                    description="Total expense for the month"),
+                    "balance": openapi.Schema(type=openapi.TYPE_NUMBER, format=openapi.FORMAT_DECIMAL,
+                                              description="Net balance (income - expenses)"),
+                }
+            ),
+            400: "Invalid request parameters",
+            403: "Unauthorized",
+        }
+    )
+
+    def get(self, request, year, month):
+        """
+        Returns total income, total expenses, and net balance for a given month.
+        """
+        transactions = Transaction.objects.filter(
+            user=request.user,
+            date__year=year,
+            date__month=month
+        )
+
+        total_income = transactions.filter(transaction_type="income").aggregate(Sum('amount'))['amount__sum'] or 0
+        total_expense = transactions.filter(transaction_type="expense").aggregate(Sum('amount'))['amount__sum'] or 0
+        balance = total_income - total_expense
+
+        return Response({
+            "year": year,
+            "month": month,
+            "total_income": total_income,
+            "total_expense": total_expense,
+            "balance": balance
+        })
+
+
+class CategorySpendingView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter('year', openapi.IN_PATH, description="Year (YYYY)", type=openapi.TYPE_INTEGER),
+            openapi.Parameter('month', openapi.IN_PATH, description="Month (1-12)", type=openapi.TYPE_INTEGER),
+        ],
+        responses={
+            200: openapi.Schema(
+                type=openapi.TYPE_OBJECT,
+                properties={
+                    "year": openapi.Schema(type=openapi.TYPE_INTEGER, description="Requested year"),
+                    "month": openapi.Schema(type=openapi.TYPE_INTEGER, description="Requested month"),
+                    "total_expense": openapi.Schema(type=openapi.TYPE_NUMBER, format=openapi.FORMAT_DECIMAL,
+                                                    description="Total expenses for the month"),
+                    "categories": openapi.Schema(
+                        type=openapi.TYPE_ARRAY,
+                        items=openapi.Schema(
+                            type=openapi.TYPE_OBJECT,
+                            properties={
+                                "category": openapi.Schema(type=openapi.TYPE_STRING, description="Category name"),
+                                "total_spent": openapi.Schema(type=openapi.TYPE_NUMBER, format=openapi.FORMAT_DECIMAL,
+                                                              description="Total amount spent in this category"),
+                                "percentage": openapi.Schema(type=openapi.TYPE_NUMBER, format=openapi.FORMAT_FLOAT,
+                                                             description="Percentage of total expenses")
+                            }
+                        )
+                    )
+                }
+            ),
+            400: "Invalid request parameters",
+            403: "Unauthorized",
+        }
+    )
+
+    def get(self, request, year, month):
+        """
+        Returns category-wise spending and their percentage of total spending in a given month.
+        """
+        transactions = Transaction.objects.filter(
+            user=request.user,
+            transaction_type="expense",
+            date__year=year,
+            date__month=month
+        )
+
+        total_expense = transactions.aggregate(Sum('amount'))['amount__sum'] or 0
+        category_spending = transactions.values('category__name').annotate(total=Sum('amount'))
+
+        response_data = []
+        for item in category_spending:
+            category_name = item['category__name']
+            category_total = item['total']
+            percentage = (category_total / total_expense * 100) if total_expense > 0 else 0
+            response_data.append({
+                "category": category_name,
+                "total_spent": category_total,
+                "percentage": round(percentage, 2)
+            })
+
+        return Response({
+            "year": year,
+            "month": month,
+            "total_expense": total_expense,
+            "categories": response_data
+        })
